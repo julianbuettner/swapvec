@@ -15,6 +15,14 @@ pub struct CheckedFileRead {
     pub batch_info_rev: Vec<BatchInfo>,
 }
 
+/// Iterator for SwapVec.
+///
+/// Items might be read from disk,
+/// so every item is wrapped in a `Result`.  
+/// The iterator aborts after the first error.
+///
+/// Dropping the iterator removes the temporary file, if existing.  
+/// Also quitting the program should remove the temporary file.
 pub struct SwapVecIter<T>
 where
     for<'a> T: Serialize + Deserialize<'a> + Hash,
@@ -31,6 +39,8 @@ where
 }
 
 impl<T: Serialize + for<'a> Deserialize<'a> + Hash> SwapVecIter<T> {
+    /// This method should not even be public,
+    /// but I don't know how to make it private.
     pub fn new(
         tempfile_written: Option<CheckedFile>,
         last_elements: VecDeque<T>,
