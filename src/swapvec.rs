@@ -128,11 +128,7 @@ impl<T: Serialize + for<'a> Deserialize<'a>> Debug for SwapVec<T> {
             f,
             "SwapVec {{elements_in_ram: {}, elements_in_file: {}, filedescriptor: {:#?}}}",
             self.vector.len(),
-            self.tempfile
-                .as_ref()
-                .map(|x| x.batch_info.len())
-                .unwrap_or(0)
-                * self.config.batch_size,
+            self.tempfile.as_ref().map_or(0, |x| x.batch_info.len()) * self.config.batch_size,
             self.tempfile.as_ref().map(|x| x.file.as_raw_fd())
         )
     }
