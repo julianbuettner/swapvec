@@ -210,7 +210,7 @@ where
             .collect::<Vec<_>>();
 
         let mut batch_hash = DefaultHasher::new();
-        batch.iter().for_each(|x| x.hash(&mut batch_hash));
+        batch.hash(&mut batch_hash);
 
         let buffer = bincode::serialize(&batch)?;
         self.tempfile.as_mut().unwrap().write_all(&buffer)?;
