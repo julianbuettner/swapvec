@@ -2,7 +2,7 @@
 
 A vector which swaps to disk when exceeding a certain length.
 
-Useful when creation and consumption of data should be
+Useful if creation and consumption of data should be
 separated by time, but not much memory should be consumed.
 
 ## Features
