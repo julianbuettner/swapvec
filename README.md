@@ -50,7 +50,7 @@ This is the code for `cargo run` (`src/main.rs`).
 ```rust
 use swapvec::{SwapVec, SwapVecConfig};
 
-const DATA_MB: u64 = 1024;
+const DATA_MB: u64 = 20;
 
 fn main() {
     let element_count = DATA_MB / 8;
