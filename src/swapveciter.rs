@@ -15,7 +15,7 @@ pub struct CheckedFileRead {
     pub batch_info_rev: Vec<BatchInfo>,
 }
 
-/// Iterator for SwapVec.
+/// Iterator for `SwapVec`.
 ///
 /// Items might be read from disk,
 /// so every item is wrapped in a `Result`.  

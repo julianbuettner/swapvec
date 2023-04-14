@@ -23,11 +23,11 @@ pub enum Compression {
 
 /// Configure when and how the vector should swap.
 ///
-/// The file creation will happen after max(swap_after, batch_size)
+/// The file creation will happen after max(`swap_after`, `batch_size`)
 /// elements.
 ///
 /// Keep in mind, that if the temporary file exists,
-/// after ever batch_size elements, at least one write (syscall)
+/// after ever `batch_size` elements, at least one write (syscall)
 /// will happen.
 #[derive(Debug, Clone)]
 pub struct SwapVecConfig {
@@ -169,7 +169,7 @@ where
     }
 
     /// Check if a file has been created.  
-    /// Is false if element count is below swap_after and below batch_size
+    /// Is false if element count is below `swap_after` and below `batch_size`
     pub fn written_to_file(&self) -> bool {
         self.tempfile.is_some()
     }
@@ -186,7 +186,7 @@ where
         }
     }
 
-    /// Basically elements pushed // batch_size
+    /// Basically elements pushed // `batch_size`
     pub fn batches_written(&self) -> usize {
         match self.tempfile.as_ref() {
             None => 0,
