@@ -194,9 +194,11 @@ where
         if self.vector.len() < self.config.batch_size {
             return Ok(());
         }
+
         if self.tempfile.is_none() && self.vector.len() < self.config.swap_after {
             return Ok(());
         }
+
         // Do action
         if self.tempfile.is_none() {
             let tf = tempfile::tempfile()?;
