@@ -23,11 +23,11 @@ pub enum Compression {
 
 /// Configure when and how the vector should swap.
 ///
-/// The file creation will happen after max(swap_after, batch_size)
+/// The file creation will happen after max(`swap_after`, `batch_size`)
 /// elements.
 ///
 /// Keep in mind, that if the temporary file exists,
-/// after ever batch_size elements, at least one write (syscall)
+/// after ever `batch_size` elements, at least one write (syscall)
 /// will happen.
 #[derive(Debug, Clone)]
 pub struct SwapVecConfig {
@@ -128,11 +128,7 @@ impl<T: Serialize + for<'a> Deserialize<'a>> Debug for SwapVec<T> {
             f,
             "SwapVec {{elements_in_ram: {}, elements_in_file: {}, filedescriptor: {:#?}}}",
             self.vector.len(),
-            self.tempfile
-                .as_ref()
-                .map(|x| x.batch_info.len())
-                .unwrap_or(0)
-                * self.config.batch_size,
+            self.tempfile.as_ref().map_or(0, |x| x.batch_info.len()) * self.config.batch_size,
             self.tempfile.as_ref().map(|x| x.file.as_raw_fd())
         )
     }
@@ -169,7 +165,7 @@ where
     }
 
     /// Check if a file has been created.  
-    /// Is false if element count is below swap_after and below batch_size
+    /// Is false if element count is below `swap_after` and below `batch_size`
     pub fn written_to_file(&self) -> bool {
         self.tempfile.is_some()
     }
@@ -186,21 +182,20 @@ where
         }
     }
 
-    /// Basically elements pushed // batch_size
+    /// Basically elements pushed // `batch_size`
     pub fn batches_written(&self) -> usize {
-        match self.tempfile.as_ref() {
-            None => 0,
-            Some(f) => f.batch_info.len(),
-        }
+        self.tempfile.as_ref().map_or(0, |f| f.batch_info.len())
     }
 
     fn after_push_work(&mut self) -> Result<(), SwapVecError> {
         if self.vector.len() < self.config.batch_size {
             return Ok(());
         }
+
         if self.tempfile.is_none() && self.vector.len() < self.config.swap_after {
             return Ok(());
         }
+
         // Do action
         if self.tempfile.is_none() {
             let tf = tempfile::tempfile()?;
@@ -215,7 +210,7 @@ where
             .collect::<Vec<_>>();
 
         let mut batch_hash = DefaultHasher::new();
-        batch.iter().for_each(|x| x.hash(&mut batch_hash));
+        batch.hash(&mut batch_hash);
 
         let buffer = bincode::serialize(&batch)?;
         self.tempfile.as_mut().unwrap().write_all(&buffer)?;
