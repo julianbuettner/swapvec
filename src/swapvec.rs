@@ -184,10 +184,7 @@ where
 
     /// Basically elements pushed // `batch_size`
     pub fn batches_written(&self) -> usize {
-        match self.tempfile.as_ref() {
-            None => 0,
-            Some(f) => f.batch_info.len(),
-        }
+        self.tempfile.as_ref().map_or(0, |f| f.batch_info.len())
     }
 
     fn after_push_work(&mut self) -> Result<(), SwapVecError> {
