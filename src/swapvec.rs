@@ -9,14 +9,12 @@ use std::{
 
 use serde::{Deserialize, Serialize};
 
-use crate::{
-    error::SwapVecError,
-    swapveciter::{SwapVecIter},
-};
+use crate::{error::SwapVecError, swapveciter::SwapVecIter};
 
 /// Configure compression for the temporary
 /// file into which your data might be swapped out.  
 #[derive(Debug, Clone)]
+#[non_exhaustive]
 pub enum Compression {
     /// Read more about LZ4 here: [LZ4]
     /// [LZ4]: https://github.com/lz4/lz4

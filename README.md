@@ -5,12 +5,21 @@ A vector which swaps to disk when exceeding a certain length.
 Useful if creation and consumption of data should be
 separated by time, but not much memory should be consumed.
 
+Imagine multiple threads slowly producing giant vectors of data,
+passing it to a single fast consumer.
+
+Or a CSV upload of multiple gigabytes to an HTTP server,
+in which you want to validate every
+line while uploading, without directly starting a Database
+transaction or keeping everything in memory.
+
 ## Features
 - Multiplatform (Linux, Windows, MacOS)
 - Creates temporary file only after exceeding threshold
 - Works on `T: Serialize + Deserialize`
 - Temporary file removed even when terminating the program
 - Checksums to guarantee integrity
+- Can be moved across threads
 
 ## Limitations
 - Due to potentially doing IO, most actions are wrapped in a `Result`
@@ -18,6 +27,8 @@ separated by time, but not much memory should be consumed.
   - Would need element wise space calculation due to heap elements (e.g. `String`)
 - `Compression` currently does not compress. It is there to keep the API stable.
 - No async support yet
+- When pushing elements or consuming iterators, SwapVec is "write only"
+- SwapVecIter can only be iterated once
 
 ## Examples
 

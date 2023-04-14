@@ -4,6 +4,7 @@
 /// errors, but this makes error handling a bit less
 /// comfortable, so they are united here.
 #[derive(Debug)]
+#[non_exhaustive]
 pub enum SwapVecError {
     /// The program is missing permissions to create a temporary file
     MissingPermissions,
@@ -23,7 +24,12 @@ pub enum SwapVecError {
 
 impl From<std::io::Error> for SwapVecError {
     fn from(_value: std::io::Error) -> Self {
-        todo!()
+        match _value.kind() {
+            // TODO https://github.com/rust-lang/rust/issues/86442
+            // std::io::ErrorKind::StorageFull => Self::OutOfDisk,
+            std::io::ErrorKind::PermissionDenied => Self::MissingPermissions,
+            _ => Self::Other,
+        }
     }
 }
 
