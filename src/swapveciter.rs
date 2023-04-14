@@ -128,15 +128,8 @@ impl<T: Serialize + for<'a> Deserialize<'a> + Hash> Iterator for SwapVecIter<T> 
             return Some(Ok(item));
         }
 
-        let next_in_batch = self.next_in_batch();
-        if let Err(err) = next_in_batch {
-            return Some(Err(err));
-        }
-        if let Ok(Some(item)) = next_in_batch {
-            return Some(Ok(item));
-        }
-
-        // File has been exhausted.
-        self.last_elements.pop_front().map(|x| Ok(x))
+        self.next_in_batch()
+            .transpose()
+            .or_else(|| self.last_elements.pop_front().map(Ok))
     }
 }
