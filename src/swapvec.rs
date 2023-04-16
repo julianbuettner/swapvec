@@ -168,15 +168,16 @@ where
         Ok(())
     }
 
-    /// Push a single element  
+    /// Push a single element.
     /// Might return an error, due to possibly triggered batch flush (IO).
     pub fn push(&mut self, element: T) -> Result<(), SwapVecError> {
         self.vector.push_back(element);
         self.after_push_work()
     }
 
-    /// Check if a file has been created.  
-    /// Is false if element count is below swap_after and below batch_size
+    /// Check if enough items have been pushed so that
+    /// the temporary file has been created.  
+    /// Will be false if element count is below swap_after and below batch_size
     pub fn written_to_file(&self) -> bool {
         self.tempfile.is_some()
     }
@@ -193,7 +194,7 @@ where
         }
     }
 
-    /// Basically elements pushed // batch_size
+    /// Basically int(elements pushed / batch size)
     pub fn batches_written(&self) -> usize {
         match self.tempfile.as_ref() {
             None => 0,
@@ -202,13 +203,14 @@ where
     }
 
     fn after_push_work(&mut self) -> Result<(), SwapVecError> {
-        if self.vector.len() < self.config.batch_size {
+        if self.vector.len() <= self.config.batch_size {
             return Ok(());
         }
-        if self.tempfile.is_none() && self.vector.len() < self.config.swap_after {
+        if self.tempfile.is_none() && self.vector.len() <= self.config.swap_after {
             return Ok(());
         }
-        // Do action
+
+        // Flush batch
         if self.tempfile.is_none() {
             let tf = tempfile::tempfile()?;
             self.tempfile = Some(CheckedFile {
@@ -216,10 +218,11 @@ where
                 batch_info: Vec::new(),
             })
         }
-
         let batch: Vec<T> = (0..self.config.batch_size)
             .map(|_| self.vector.pop_front().unwrap())
             .collect::<Vec<_>>();
+        // TODO: shrink self.vector by writing double
+        // sized batches and calling self.vector.shrink_to()
 
         let mut batch_hash = DefaultHasher::new();
         batch.iter().for_each(|x| x.hash(&mut batch_hash));
