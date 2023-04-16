@@ -4,8 +4,10 @@ use std::{
     fs::File,
     hash::{Hash, Hasher},
     io::Write,
-    os::fd::AsRawFd,
 };
+
+#[cfg(unix)]
+use std::os::fd::AsRawFd;
 
 use serde::{Deserialize, Serialize};
 
@@ -124,6 +126,11 @@ impl<T: Serialize + for<'a> Deserialize<'a>> Default for SwapVec<T> {
 
 impl<T: Serialize + for<'a> Deserialize<'a>> Debug for SwapVec<T> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        #[cfg(not(unix))]
+        let file_descriptor: Option<i32> = None;
+        #[cfg(unix)]
+        let file_descriptor = self.tempfile.as_ref().map(|x| x.file.as_raw_fd());
+
         write!(
             f,
             "SwapVec {{elements_in_ram: {}, elements_in_file: {}, filedescriptor: {:#?}}}",
@@ -133,7 +140,7 @@ impl<T: Serialize + for<'a> Deserialize<'a>> Debug for SwapVec<T> {
                 .map(|x| x.batch_info.len())
                 .unwrap_or(0)
                 * self.config.batch_size,
-            self.tempfile.as_ref().map(|x| x.file.as_raw_fd())
+            file_descriptor
         )
     }
 }
