@@ -126,9 +126,9 @@ impl<T: Serialize + for<'a> Deserialize<'a>> Default for SwapVec<T> {
 
 impl<T: Serialize + for<'a> Deserialize<'a>> Debug for SwapVec<T> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        #[cfg(not(unix))]
+        #[cfg(not(any(unix, target_os = "wasi")))]
         let file_descriptor: Option<i32> = None;
-        #[cfg(unix)]
+        #[cfg(any(unix, target_os = "wasi"))]
         let file_descriptor = self.tempfile.as_ref().map(|x| x.file.as_raw_fd());
 
         write!(
