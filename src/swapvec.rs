@@ -6,7 +6,10 @@ use std::{
     io::Write,
 };
 
-#[cfg(unix)]
+#[cfg(any(unix, target_os = "wasi"))]
+use std::os::unix::io::AsRawFd;
+
+#[cfg(not(any(unix, target_os = "wasi")))]
 use std::os::fd::AsRawFd;
 
 use serde::{Deserialize, Serialize};
