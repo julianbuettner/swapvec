@@ -9,9 +9,6 @@ use std::{
 #[cfg(any(unix, target_os = "wasi"))]
 use std::os::unix::io::AsRawFd;
 
-#[cfg(not(any(unix, target_os = "wasi")))]
-use std::os::fd::AsRawFd;
-
 use serde::{Deserialize, Serialize};
 
 use crate::{error::SwapVecError, swapveciter::SwapVecIter};
