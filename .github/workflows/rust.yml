@@ -27,5 +27,15 @@ jobs:
       run: cargo test --verbose
     - name: Run lint
       run: cargo clippy
-    - name: Check Windows
-      run: cargo check --target x86_64-pc-windows-msvc
+
+  windows-check:
+    runs-on: self-hosted
+    steps:
+      - uses: actions-rs/toolchain@v1
+        with:
+          target: x86_64-pc-windows-msvc
+          toolchain: stable
+          override: true
+      - uses: actions/checkout@v2
+      - name: Check Windows
+        run: cargo check --target x86_64-pc-windows-msvc
