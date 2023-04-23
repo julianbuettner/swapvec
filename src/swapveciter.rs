@@ -7,6 +7,7 @@ use std::{collections::VecDeque, io::Seek};
 
 use serde::{Deserialize, Serialize};
 
+use crate::compression::Compress;
 use crate::error::SwapVecError;
 use crate::swapvec::{BatchInfo, CheckedFile, SwapVecConfig};
 
@@ -25,7 +26,7 @@ pub struct CheckedFileRead {
 /// Also quitting the program should remove the temporary file.
 pub struct SwapVecIter<T>
 where
-    for<'a> T: Serialize + Deserialize<'a> + Hash,
+    for<'a> T: Serialize + Deserialize<'a>,
 {
     seeked_zero: bool,
     current_batch_rev: Vec<T>,
@@ -36,12 +37,13 @@ where
     // first read elements from disk and
     // then from last_elements.
     last_elements: VecDeque<T>,
+    config: SwapVecConfig,
 }
 
-impl<T: Serialize + for<'a> Deserialize<'a> + Hash> SwapVecIter<T> {
+impl<T: Serialize + for<'a> Deserialize<'a>> SwapVecIter<T> {
     /// This method should not even be public,
     /// but I don't know how to make it private.
-    pub fn new(
+    pub(crate) fn new(
         tempfile_written: Option<CheckedFile>,
         last_elements: VecDeque<T>,
         config: SwapVecConfig,
@@ -58,6 +60,7 @@ impl<T: Serialize + for<'a> Deserialize<'a> + Hash> SwapVecIter<T> {
             current_batch_rev: Vec::with_capacity(config.batch_size),
             last_elements,
             tempfile,
+            config,
         }
     }
 
@@ -95,7 +98,13 @@ impl<T: Serialize + for<'a> Deserialize<'a> + Hash> SwapVecIter<T> {
             return Err(SwapVecError::WrongChecksum);
         }
 
-        let batch: Vec<T> = bincode::deserialize(&buffer)?;
+        let decompressed: Vec<u8> = self
+            .config
+            .compression
+            .decompress(buffer)
+            .map_err(|_| SwapVecError::Decompression)?;
+
+        let batch: Vec<T> = bincode::deserialize(&decompressed)?;
 
         // If everything from file has been read,
         // mark as empty.
@@ -120,7 +129,7 @@ impl<T: Serialize + for<'a> Deserialize<'a> + Hash> SwapVecIter<T> {
     }
 }
 
-impl<T: Serialize + for<'a> Deserialize<'a> + Hash> Iterator for SwapVecIter<T> {
+impl<T: Serialize + for<'a> Deserialize<'a>> Iterator for SwapVecIter<T> {
     type Item = Result<T, SwapVecError>;
 
     fn next(&mut self) -> Option<Self::Item> {

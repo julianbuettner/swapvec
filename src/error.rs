@@ -12,6 +12,9 @@ pub enum SwapVecError {
     OutOfDisk,
     /// A read back batch had a wrong checksum
     WrongChecksum,
+    /// A batch could not be decompressed correctly.
+    /// This also happens only if the file has been corrupted.
+    Decompression,
     /// The batch was read back successfully,
     /// but the serialization failed.
     ///

@@ -11,16 +11,35 @@ use std::os::unix::io::AsRawFd;
 
 use serde::{Deserialize, Serialize};
 
-use crate::{error::SwapVecError, swapveciter::SwapVecIter};
+use crate::{compression::Compress, error::SwapVecError, swapveciter::SwapVecIter};
+
+/// Set compression level of the compression
+/// algorithm. This maps to different values
+/// depending on the chosen algortihm.
+#[derive(Clone, Debug, Copy)]
+pub enum CompressionLevel {
+    /// Slower than default, higher compression.
+    /// Might be useful for big amount of data
+    /// which requires heavier compression.
+    Slow,
+    /// A good ratio of compression ratio to cpu time.
+    Default,
+    /// Accept worse compression for speed.
+    /// Useful for easily compressable data with
+    /// many repetitions.
+    Fast,
+}
 
 /// Configure compression for the temporary
 /// file into which your data might be swapped out.  
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Copy)]
 #[non_exhaustive]
 pub enum Compression {
     /// Read more about LZ4 here: [LZ4]
     /// [LZ4]: https://github.com/lz4/lz4
     Lz4,
+    /// Deflate, mostly known from gzip.
+    Deflate(CompressionLevel),
 }
 
 /// Configure when and how the vector should swap.
@@ -31,7 +50,7 @@ pub enum Compression {
 /// Keep in mind, that if the temporary file exists,
 /// after ever batch_size elements, at least one write (syscall)
 /// will happen.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Copy)]
 pub struct SwapVecConfig {
     /// The vector will create a temporary file and starting to
     /// swap after so many elements.
@@ -75,7 +94,7 @@ pub struct BatchInfo {
     pub bytes: usize,
 }
 
-pub struct CheckedFile {
+pub(crate) struct CheckedFile {
     pub file: File,
     pub batch_info: Vec<BatchInfo>,
 }
@@ -84,12 +103,16 @@ impl CheckedFile {
     fn write_all(&mut self, buffer: &Vec<u8>) -> Result<(), std::io::Error> {
         let mut hasher = DefaultHasher::new();
         buffer.hash(&mut hasher);
-        let _res = self.file.write_all(buffer);
+        self.file.write_all(buffer)?;
         self.batch_info.push(BatchInfo {
             hash: hasher.finish(),
             bytes: buffer.len(),
         });
         self.file.flush()
+    }
+
+    fn file_size(&self) -> u64 {
+        self.batch_info.iter().map(|x| x.bytes as u64).sum()
     }
 }
 
@@ -147,7 +170,7 @@ impl<T: Serialize + for<'a> Deserialize<'a>> Debug for SwapVec<T> {
 
 impl<T> SwapVec<T>
 where
-    for<'a> T: Serialize + Deserialize<'a> + Hash,
+    for<'a> T: Serialize + Deserialize<'a>,
 {
     /// Intialize with non-default configuration.
     pub fn with_config(config: SwapVecConfig) -> Self {
@@ -184,13 +207,10 @@ where
 
     /// Get the file size in bytes of the temporary file.
     /// Might do IO and therefore could return some Result.
-    pub fn file_size(&self) -> Option<Result<u64, SwapVecError>> {
+    pub fn file_size(&self) -> Option<u64> {
         match self.tempfile.as_ref() {
             None => None,
-            Some(f) => match f.file.metadata() {
-                Err(err) => Some(Err(err.into())),
-                Ok(meta) => Some(Ok(meta.len())),
-            },
+            Some(f) => Some(f.file_size()),
         }
     }
 
@@ -224,16 +244,14 @@ where
         // TODO: shrink self.vector by writing double
         // sized batches and calling self.vector.shrink_to()
 
-        let mut batch_hash = DefaultHasher::new();
-        batch.iter().for_each(|x| x.hash(&mut batch_hash));
-
         let buffer = bincode::serialize(&batch)?;
-        self.tempfile.as_mut().unwrap().write_all(&buffer)?;
+        let compressed = self.config.compression.compress(buffer);
+        self.tempfile.as_mut().unwrap().write_all(&compressed)?;
         Ok(())
     }
 }
 
-impl<T: Serialize + for<'a> Deserialize<'a> + Hash> IntoIterator for SwapVec<T> {
+impl<T: Serialize + for<'a> Deserialize<'a>> IntoIterator for SwapVec<T> {
     type Item = Result<T, SwapVecError>;
     type IntoIter = SwapVecIter<T>;
 

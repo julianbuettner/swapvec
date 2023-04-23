@@ -69,7 +69,7 @@ fn main() {
         "Filesize: {}MB",
         swapvec
             .file_size()
-            .map(|x| x.unwrap() / 1024 / 1024)
+            .map(|x| x / 1024 / 1024)
             .unwrap_or(0)
     );
     println!("Read back");
