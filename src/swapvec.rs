@@ -11,7 +11,11 @@ use std::os::unix::io::AsRawFd;
 
 use serde::{Deserialize, Serialize};
 
-use crate::{compression::Compress, error::SwapVecError, swapveciter::SwapVecIter};
+use crate::{
+    compression::{Compress, CompressBoxedClone},
+    error::SwapVecError,
+    swapveciter::SwapVecIter,
+};
 
 /// Set compression level of the compression
 /// algorithm. This maps to different values
@@ -32,7 +36,7 @@ pub enum CompressionLevel {
 
 /// Configure compression for the temporary
 /// file into which your data might be swapped out.  
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug)]
 #[non_exhaustive]
 pub enum Compression {
     /// Read more about LZ4 here: [LZ4]
@@ -40,6 +44,19 @@ pub enum Compression {
     Lz4,
     /// Deflate, mostly known from gzip.
     Deflate(CompressionLevel),
+    /// Provide your own compression algortihm by implementing
+    /// `Compress`.
+    Custom(Box<dyn CompressBoxedClone>),
+}
+
+impl Clone for Compression {
+    fn clone(&self) -> Self {
+        match &self {
+            Self::Lz4 => Self::Lz4,
+            Self::Deflate(n) => Self::Deflate(*n),
+            Self::Custom(x) => Self::Custom(x.boxed_clone()),
+        }
+    }
 }
 
 /// Configure when and how the vector should swap.
@@ -50,7 +67,7 @@ pub enum Compression {
 /// Keep in mind, that if the temporary file exists,
 /// after ever batch_size elements, at least one write (syscall)
 /// will happen.
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug)]
 pub struct SwapVecConfig {
     /// The vector will create a temporary file and starting to
     /// swap after so many elements.
@@ -208,10 +225,7 @@ where
     /// Get the file size in bytes of the temporary file.
     /// Might do IO and therefore could return some Result.
     pub fn file_size(&self) -> Option<u64> {
-        match self.tempfile.as_ref() {
-            None => None,
-            Some(f) => Some(f.file_size()),
-        }
+        self.tempfile.as_ref().map(|f| f.file_size())
     }
 
     /// Basically int(elements pushed / batch size)

@@ -14,12 +14,12 @@ fn write_and_read_back_with_compression() {
 
     for compression in compression_configs {
         let config = SwapVecConfig {
-            compression,
+            compression: compression.clone(),
             swap_after: 16,
             batch_size: 8,
         };
         let mut v = SwapVec::with_config(config);
-        v.consume(data.iter().map(|x| *x)).unwrap();
+        v.consume(data.iter().copied()).unwrap();
         let read_back: Vec<i32> = v
             .into_iter()
             .map(|x| {

@@ -7,5 +7,6 @@ mod swapvec;
 mod swapveciter;
 
 pub use self::swapvec::{Compression, CompressionLevel, SwapVec, SwapVecConfig};
+pub use compression::{Compress, CompressBoxedClone};
 pub use error::SwapVecError;
 pub use swapveciter::SwapVecIter;
