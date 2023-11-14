@@ -22,7 +22,7 @@ pub enum SwapVecError {
     /// of your type `T`.
     SerializationFailed(bincode::ErrorKind),
     /// Every other possibility
-    Other,
+    Other(std::io::ErrorKind),
 }
 
 impl From<std::io::Error> for SwapVecError {
@@ -31,7 +31,7 @@ impl From<std::io::Error> for SwapVecError {
             // TODO https://github.com/rust-lang/rust/issues/86442
             // std::io::ErrorKind::StorageFull => Self::OutOfDisk,
             std::io::ErrorKind::PermissionDenied => Self::MissingPermissions,
-            _ => Self::Other,
+            e => Self::Other(e),
         }
     }
 }

@@ -1,19 +1,32 @@
-use std::collections::hash_map::DefaultHasher;
-
+use std::collections::VecDeque;
 use std::fs::File;
-use std::hash::{Hash, Hasher};
-use std::io::Read;
-use std::{collections::VecDeque, io::Seek};
 
 use serde::{Deserialize, Serialize};
 
+use crate::checkedfile::{BatchReader, BatchWriter};
 use crate::compression::Compress;
 use crate::error::SwapVecError;
-use crate::swapvec::{BatchInfo, CheckedFile, SwapVecConfig};
+use crate::swapvec::SwapVecConfig;
 
-pub struct CheckedFileRead {
-    pub file: File,
-    pub batch_info_rev: Vec<BatchInfo>,
+struct VecDequeIndex<T: Clone> {
+    value: VecDeque<T>,
+}
+
+impl<T: Clone> From<VecDeque<T>> for VecDequeIndex<T> {
+    fn from(value: VecDeque<T>) -> Self {
+        Self { value }
+    }
+}
+
+impl<T: Clone> VecDequeIndex<T> {
+    fn get(&self, i: usize) -> Option<T> {
+        let (a, b) = self.value.as_slices();
+        if i < a.len() {
+            a.get(i).cloned()
+        } else {
+            b.get(i - a.len()).cloned()
+        }
+    }
 }
 
 /// Iterator for SwapVec.
@@ -26,91 +39,68 @@ pub struct CheckedFileRead {
 /// Also quitting the program should remove the temporary file.
 pub struct SwapVecIter<T>
 where
-    for<'a> T: Serialize + Deserialize<'a>,
+    for<'a> T: Serialize + Deserialize<'a> + Clone,
 {
-    seeked_zero: bool,
+    // Do not error on new, because into_iter()
+    // is not allowed to fail. Fail at first try then.
+    new_error: Option<std::io::Error>,
     current_batch_rev: Vec<T>,
-    tempfile: Option<CheckedFileRead>,
+    tempfile: Option<BatchReader<File>>,
     // last_elements are elements,
     // which have not been written to disk.
     // Therefore, for iterating from zero,
     // first read elements from disk and
     // then from last_elements.
-    last_elements: VecDeque<T>,
+    last_elements: VecDequeIndex<T>,
+    last_elements_index: usize,
     config: SwapVecConfig,
 }
 
-impl<T: Serialize + for<'a> Deserialize<'a>> SwapVecIter<T> {
-    /// This method should not even be public,
-    /// but I don't know how to make it private.
+impl<T: Serialize + for<'a> Deserialize<'a> + Clone> SwapVecIter<T> {
     pub(crate) fn new(
-        tempfile_written: Option<CheckedFile>,
+        tempfile_written: Option<BatchWriter<File>>,
         last_elements: VecDeque<T>,
         config: SwapVecConfig,
     ) -> Self {
-        let tempfile = tempfile_written.map(|mut x| {
-            x.batch_info.reverse();
-            CheckedFileRead {
-                file: x.file,
-                batch_info_rev: x.batch_info,
-            }
-        });
+        let (tempfile, new_error) = match tempfile_written.map(|v| v.try_into()) {
+            None => (None, None),
+            Some(Ok(v)) => (Some(v), None),
+            Some(Err(e)) => (None, Some(e)),
+        };
+
+        let last_elements: VecDequeIndex<_> = last_elements.into();
         Self {
-            seeked_zero: false,
+            new_error,
             current_batch_rev: Vec::with_capacity(config.batch_size),
             last_elements,
+            last_elements_index: 0,
             tempfile,
             config,
         }
-    }
-
-    fn ensure_seeked_zero(&mut self) -> Result<(), SwapVecError> {
-        if !self.seeked_zero {
-            if let Some(some_tempfile) = self.tempfile.as_mut() {
-                if let Err(err) = some_tempfile.file.seek(std::io::SeekFrom::Start(0)) {
-                    return Err(err.into());
-                }
-            }
-            self.seeked_zero = true;
-        }
-        Ok(())
     }
 
     fn read_batch(&mut self) -> Result<Option<Vec<T>>, SwapVecError> {
         if self.tempfile.is_none() {
             return Ok(None);
         }
-        self.ensure_seeked_zero()?;
+        assert!(self.tempfile.is_some());
+        if let Some(err) = self.new_error.take() {
+            return Err(err.into());
+        }
 
         let tempfile = self.tempfile.as_mut().unwrap();
-        let batch_info = tempfile.batch_info_rev.pop();
-        if batch_info.is_none() {
+        let buffer = tempfile.read_batch()?;
+        if buffer.is_none() {
             return Ok(None);
         }
-
-        let batch_info = batch_info.unwrap();
-        let mut buffer = vec![0; batch_info.bytes];
-        tempfile.file.read_exact(&mut buffer)?;
-
-        let mut hasher = DefaultHasher::new();
-        buffer.hash(&mut hasher);
-        if hasher.finish() != batch_info.hash {
-            return Err(SwapVecError::WrongChecksum);
-        }
-
+        let buffer = buffer.unwrap();
         let decompressed: Vec<u8> = self
             .config
             .compression
-            .decompress(buffer)
+            .decompress(buffer.to_vec())
             .map_err(|_| SwapVecError::Decompression)?;
 
         let batch: Vec<T> = bincode::deserialize(&decompressed)?;
-
-        // If everything from file has been read,
-        // mark as empty.
-        if tempfile.batch_info_rev.is_empty() {
-            self.tempfile = None;
-        }
 
         Ok(Some(batch))
     }
@@ -127,9 +117,33 @@ impl<T: Serialize + for<'a> Deserialize<'a>> SwapVecIter<T> {
             Ok(None)
         }
     }
+
+    /// Resets the iteration, starting from the first element.
+    /// If a file exists, it will be read from the beginning.  
+    ///
+    /// To use this feature, you probably don't want to consume
+    /// the iterator (`bigvec.map(|x| x * 2)`), but to use
+    /// [`Iterator::by_ref()`](https://doc.rust-lang.org/std/iter/trait.Iterator.html#method.by_ref)
+    /// ```rust
+    /// let mut bigvec = swapvec::SwapVec::default();
+    /// bigvec.consume(0..99);
+    /// let mut new_iterator = bigvec.into_iter();
+    /// let sum: usize = new_iterator.by_ref().map(|v| v.unwrap()).sum();
+    /// new_iterator.reset();
+    /// let sum_double: usize = new_iterator.by_ref().map(|v| v.unwrap() * 2).sum();
+    /// ```
+    pub fn reset(&mut self) {
+        self.current_batch_rev.clear();
+        self.last_elements_index = 0;
+        if let Some(tempfile) = self.tempfile.as_mut() {
+            if let Err(e) = tempfile.reset() {
+                self.new_error = Some(e);
+            }
+        }
+    }
 }
 
-impl<T: Serialize + for<'a> Deserialize<'a>> Iterator for SwapVecIter<T> {
+impl<T: Serialize + for<'a> Deserialize<'a> + Clone> Iterator for SwapVecIter<T> {
     type Item = Result<T, SwapVecError>;
 
     fn next(&mut self) -> Option<Self::Item> {
@@ -137,15 +151,14 @@ impl<T: Serialize + for<'a> Deserialize<'a>> Iterator for SwapVecIter<T> {
             return Some(Ok(item));
         }
 
-        let next_in_batch = self.next_in_batch();
-        if let Err(err) = next_in_batch {
-            return Some(Err(err));
+        match self.next_in_batch() {
+            Err(err) => Some(Err(err)),
+            Ok(Some(item)) => Some(Ok(item)),
+            Ok(None) => {
+                let index = self.last_elements_index;
+                self.last_elements_index += 1;
+                self.last_elements.get(index).map(|x| Ok(x))
+            }
         }
-        if let Ok(Some(item)) = next_in_batch {
-            return Some(Ok(item));
-        }
-
-        // File has been exhausted.
-        self.last_elements.pop_front().map(|x| Ok(x))
     }
 }

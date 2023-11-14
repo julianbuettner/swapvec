@@ -2,11 +2,11 @@
 
 A vector which swaps to disk when exceeding a certain length.
 
-Useful if creation and consumption of data should be
-separated by time, but not much memory should be consumed.
+Useful if you do not want to use a queue, but first collecting
+all data and then consuming it.
 
 Imagine multiple threads slowly producing giant vectors of data,
-passing it to a single fast consumer.
+passing it to a single consumer later on.
 
 Or a CSV upload of multiple gigabytes to an HTTP server,
 in which you want to validate every
@@ -16,7 +16,7 @@ transaction or keeping everything in memory.
 ## Features
 - Multiplatform (Linux, Windows, MacOS)
 - Creates temporary file only after exceeding threshold
-- Works on `T: Serialize + Deserialize`
+- Works on `T: Serialize + Deserialize + Clone`
 - Temporary file removed even when terminating the program
 - Checksums to guarantee integrity
 - Can be moved across threads
@@ -26,9 +26,10 @@ transaction or keeping everything in memory.
 - Currently, no "start swapping after n MiB" is implemented
   - Would need element wise space calculation due to heap elements (e.g. `String`)
 - `Compression` currently does not compress. It is there to keep the API stable.
-- No async support yet
+- No async support (yet)
 - When pushing elements or consuming iterators, SwapVec is "write only"
-- SwapVecIter can only be iterated once
+- Only forwards iterations
+    - Can be reset though
 
 ## Examples
 
@@ -45,38 +46,13 @@ for value in much_data.into_iter() {
 }
 ```
 
-### Extended Usage
-This is the code for `cargo run` (`src/main.rs`).  
-```rust
-use swapvec::{SwapVec, SwapVecConfig};
+### Examples
 
-const DATA_MB: u64 = 20;
+Currently there is only one simple example,
+doing some basic operations and getting metrics like
+getting the batches/bytes written to file.
+. Run it with
 
-fn main() {
-    let element_count = DATA_MB / 8;
-    let big_iterator = 0..element_count * 1024 * 1024;
-
-    let config = swapvec::SwapVecConfig {
-        batch_size: 8 * 1024,
-        ..SwapVecConfig::default()
-    };
-    let mut swapvec: SwapVec<_> = SwapVec::with_config(config);
-    swapvec.consume(big_iterator.into_iter()).unwrap();
-
-    println!("Data size: {}MB", DATA_MB);
-    println!("Done. Batches written: {}", swapvec.batches_written());
-    println!(
-        "Filesize: {}MB",
-        swapvec
-            .file_size()
-            .map(|x| x / 1024 / 1024)
-            .unwrap_or(0)
-    );
-    println!("Read back");
-
-    let read_back: Vec<_> = swapvec.into_iter().map(|x| x.unwrap()).collect();
-
-    println!("{:#?}", read_back.len());
-}
+```bash
+cargo run --example demo
 ```
-

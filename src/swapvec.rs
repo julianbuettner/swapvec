@@ -1,17 +1,13 @@
 use std::{
-    collections::{hash_map::DefaultHasher, VecDeque},
+    collections::VecDeque,
     fmt::Debug,
     fs::File,
-    hash::{Hash, Hasher},
-    io::Write,
 };
-
-#[cfg(any(unix, target_os = "wasi"))]
-use std::os::unix::io::AsRawFd;
 
 use serde::{Deserialize, Serialize};
 
 use crate::{
+    checkedfile::BatchWriter,
     compression::{Compress, CompressBoxedClone},
     error::SwapVecError,
     swapveciter::SwapVecIter,
@@ -106,33 +102,6 @@ impl Default for SwapVecConfig {
     }
 }
 
-pub struct BatchInfo {
-    pub hash: u64,
-    pub bytes: usize,
-}
-
-pub(crate) struct CheckedFile {
-    pub file: File,
-    pub batch_info: Vec<BatchInfo>,
-}
-
-impl CheckedFile {
-    fn write_all(&mut self, buffer: &Vec<u8>) -> Result<(), std::io::Error> {
-        let mut hasher = DefaultHasher::new();
-        buffer.hash(&mut hasher);
-        self.file.write_all(buffer)?;
-        self.batch_info.push(BatchInfo {
-            hash: hasher.finish(),
-            bytes: buffer.len(),
-        });
-        self.file.flush()
-    }
-
-    fn file_size(&self) -> u64 {
-        self.batch_info.iter().map(|x| x.bytes as u64).sum()
-    }
-}
-
 /// An only growing array type
 /// which swaps to disk, based on it's initial configuration.
 ///
@@ -149,7 +118,7 @@ pub struct SwapVec<T>
 where
     for<'a> T: Serialize + Deserialize<'a>,
 {
-    tempfile: Option<CheckedFile>,
+    tempfile: Option<BatchWriter<File>>,
     vector: VecDeque<T>,
     config: SwapVecConfig,
 }
@@ -166,28 +135,18 @@ impl<T: Serialize + for<'a> Deserialize<'a>> Default for SwapVec<T> {
 
 impl<T: Serialize + for<'a> Deserialize<'a>> Debug for SwapVec<T> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        #[cfg(not(any(unix, target_os = "wasi")))]
-        let file_descriptor: Option<i32> = None;
-        #[cfg(any(unix, target_os = "wasi"))]
-        let file_descriptor = self.tempfile.as_ref().map(|x| x.file.as_raw_fd());
-
         write!(
             f,
-            "SwapVec {{elements_in_ram: {}, elements_in_file: {}, filedescriptor: {:#?}}}",
+            "SwapVec {{elements_in_ram: {}, elements_in_file: {}}}",
             self.vector.len(),
-            self.tempfile
-                .as_ref()
-                .map(|x| x.batch_info.len())
-                .unwrap_or(0)
-                * self.config.batch_size,
-            file_descriptor
+            self.tempfile.as_ref().map(|x| x.batch_count()).unwrap_or(0) * self.config.batch_size,
         )
     }
 }
 
 impl<T> SwapVec<T>
 where
-    for<'a> T: Serialize + Deserialize<'a>,
+    for<'a> T: Serialize + Deserialize<'a> + Clone,
 {
     /// Intialize with non-default configuration.
     pub fn with_config(config: SwapVecConfig) -> Self {
@@ -210,6 +169,11 @@ where
 
     /// Push a single element.
     /// Might return an error, due to possibly triggered batch flush (IO).
+    /// Will write at most one batch per insert.
+    /// If `swap_after` is bigger than `batch_size` and a file is created,
+    /// every insert will
+    /// write one batch to disk, until the elements in memory have a count
+    /// smaller than or equal to batch size.
     pub fn push(&mut self, element: T) -> Result<(), SwapVecError> {
         self.vector.push_back(element);
         self.after_push_work()
@@ -224,15 +188,15 @@ where
 
     /// Get the file size in bytes of the temporary file.
     /// Might do IO and therefore could return some Result.
-    pub fn file_size(&self) -> Option<u64> {
-        self.tempfile.as_ref().map(|f| f.file_size())
+    pub fn file_size(&self) -> Option<usize> {
+        self.tempfile.as_ref().map(|f| f.bytes_written())
     }
 
     /// Basically int(elements pushed / batch size)
     pub fn batches_written(&self) -> usize {
         match self.tempfile.as_ref() {
             None => 0,
-            Some(f) => f.batch_info.len(),
+            Some(f) => f.batch_count(),
         }
     }
 
@@ -247,25 +211,19 @@ where
         // Flush batch
         if self.tempfile.is_none() {
             let tf = tempfile::tempfile()?;
-            self.tempfile = Some(CheckedFile {
-                file: tf,
-                batch_info: Vec::new(),
-            })
+            self.tempfile = Some(BatchWriter::new(tf));
         }
-        let batch: Vec<T> = (0..self.config.batch_size)
-            .map(|_| self.vector.pop_front().unwrap())
-            .collect::<Vec<_>>();
-        // TODO: shrink self.vector by writing double
-        // sized batches and calling self.vector.shrink_to()
+        assert!(self.tempfile.is_some());
+        let batch: Vec<_> = self.vector.drain(0..self.config.batch_size).collect();
 
         let buffer = bincode::serialize(&batch)?;
         let compressed = self.config.compression.compress(buffer);
-        self.tempfile.as_mut().unwrap().write_all(&compressed)?;
+        self.tempfile.as_mut().unwrap().write_batch(&compressed)?;
         Ok(())
     }
 }
 
-impl<T: Serialize + for<'a> Deserialize<'a>> IntoIterator for SwapVec<T> {
+impl<T: Serialize + for<'a> Deserialize<'a> + Clone> IntoIterator for SwapVec<T> {
     type Item = Result<T, SwapVecError>;
     type IntoIter = SwapVecIter<T>;
 
