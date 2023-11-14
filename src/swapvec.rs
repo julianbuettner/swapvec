@@ -210,7 +210,7 @@ where
 
         // Flush batch
         if self.tempfile.is_none() {
-            let tf = tempfile::tempfile()?;
+            let tf = tempfile::Builder::new().tempfile_in(".")?.into_file();
             self.tempfile = Some(BatchWriter::new(tf));
         }
         assert!(self.tempfile.is_some());
