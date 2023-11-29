@@ -1,6 +1,6 @@
 use std::{
-    hash::{DefaultHasher, Hash, Hasher},
-    io::{self, BufReader, BufWriter, Error, Read, Seek, Write},
+    hash::{Hash, Hasher},
+    io::{self, BufReader, BufWriter, Error, Read, Seek, Write}, collections::hash_map::DefaultHasher,
 };
 
 use crate::SwapVecError;
